@@ -24,30 +24,20 @@ Mat colorize(const Mat &map)
 Mat classify(const Mat &gt, int nStates)
 {
 	// Certainty that the groundtruth is correct
-	const float GT_PROB = 0.50;
+	const float GT_PROB = 0.55f;
 
 	Mat res(gt.size(), CV_32FC(nStates));
-	res.setTo(0);
+	res.setTo( (1.0f - GT_PROB) / (nStates - 1));
 	
 	for (int y = 0; y < res.rows; y++) {
-		const Vec3b * pGt = gt.ptr<Vec3b>(y);
-		float	    * pRes = res.ptr<float>(y);
+		const byte	* pGt  = gt.ptr<byte>(y);
+		float		* pRes = res.ptr<float>(y);
 		for (int x = 0; x < res.cols; x++) {
 
-			// Map the color to a label
-			auto elem = find(vPalette.begin(), vPalette.end(), pGt[x]);
-			
-			int state = 0;
-			if (elem == vPalette.end()) {	// found nothing
-				if (vPalette.size() < nStates) {
-					state = vPalette.size();
-					vPalette.push_back(pGt[x]);
-				}
-			}
-			else state = elem - vPalette.begin();
+			int state = pGt[x];
 
-			for (int s = 0; s < nStates; s++) pRes[x * nStates + s] = -log((1.0f - GT_PROB) / (nStates - 1));
-			pRes[x * nStates + state] = -log(GT_PROB);
+			//for (int s = 0; s < nStates; s++) pRes[x * nStates + s] = (1.0f - GT_PROB) / (nStates - 1);
+			pRes[x * nStates + state] = GT_PROB;
 		} // x
 	} // y
 
@@ -84,10 +74,10 @@ void fillPalette(void)
 
 int main(int argc, char *argv[])
 {
-	if (argc < 4) {
-		printf("Usage: %s image annotations output\n", argv[0] );
-		return 1;
-	}
+//	if (argc < 4) {
+//		printf("Usage: %s image annotations output\n", argv[0] );
+//		return 1;
+//	}
 	
 	// Number of labels
 	const int nStates = 21;
@@ -102,7 +92,7 @@ int main(int argc, char *argv[])
 	imshow("Input Image", img);
 
 	//Mat gt = imread(argv[2], 1);
-	Mat gt = imread("D:\\Data\\EMDS4\\Ground_Truth_Images\\t4-g02-11.png", 1);
+	Mat gt = imread("D:\\Data\\EMDS4\\Ground_Truth_Images\\t4-g02-11.png", 0);
 	gt /= 255;
 	gt *= 255;
 	if (gt.empty()) {
@@ -120,6 +110,8 @@ int main(int argc, char *argv[])
 	int height = img.rows;
 
 	/////////// Put your own unary classifier here! ///////////
+	gt /= 255;
+	gt *= 2;
 	Mat pot1 = classify(gt, nStates);		// Pot is CV32FC(nStates)
 	fillPalette();
 	Mat pot = dgm::Serialize::from("D:\\Res\\Potentials\\t4-g02-11.dat");
@@ -135,8 +127,15 @@ int main(int argc, char *argv[])
 	Mat solution(pot.size(), CV_8UC1, optimalDecoding.data());
 	Mat resDGM = colorize<byte>(solution);
 
-	for (auto it = pot.begin<float>(); it != pot.end<float>(); it++)
-		(*it) = -logf(*it/100);
+
+	for (int y = 0; y < pot.rows; y++) {
+		float		* pPot = pot.ptr<float>(y);
+		for (int x = 0; x < pot.cols; x++) {
+			for (int s = 0; s < nStates; s++)
+				pPot[x * nStates + s] = -logf(pPot[x * nStates + s]);
+		} // x
+	} // y
+
 
 
 	//imshow("Pot", pot);
@@ -153,27 +152,27 @@ int main(int argc, char *argv[])
 	// x_stddev = 3
 	// y_stddev = 3
 	// weight = 3
-//	crf.addPairwiseGaussian(3, 3, 3);
+	crf.addPairwiseGaussian(3, 3, 3);
 	
 	// add a color dependent term (feature = xyrgb)
 	// x_stddev = 60
 	// y_stddev = 60
 	// r_stddev = g_stddev = b_stddev = 20
 	// weight = 10
-//	crf.addPairwiseBilateral(60, 60, 20, 20, 20, img.data, 10);
+	crf.addPairwiseBilateral(60, 60, 20, 20, 20, img.data, 10);
 	
 	// Do map inference
 	short *map = new short[width * height];
-	crf.map(0, map);
+	crf.map(100, map);
 	
 	// Store the result
-	Mat res = colorize<short>(Mat(height, width, CV_16SC1, map));
+	Mat res = colorize<short>(Mat(height, width, CV_16UC1, map));
 	
 	imshow("Result DGB", resDGM);
 	imshow("Result", res);
 	cvWaitKey();
 	
-	imwrite(argv[3], res);
+//	imwrite(argv[3], res);
 	
 	delete[] map;
 
