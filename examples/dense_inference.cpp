@@ -74,107 +74,97 @@ void fillPalette(void)
 
 int main(int argc, char *argv[])
 {
-//	if (argc < 4) {
-//		printf("Usage: %s image annotations output\n", argv[0] );
-//		return 1;
-//	}
-	
-	// Number of labels
 	const int nStates = 21;
 	
-	// Load the color image and some crude annotations (which are used in a simple classifier)
-	//Mat img = imread(argv[1], 1);
-	Mat img = imread("D:\\Data\\EMDS4\\Original_EM_Images\\t4-g02-11.png", 1);
-	if (img.empty()) {
-		printf("Failed to load image %s\n", argv[1]);
-		return 1;
-	}
-	imshow("Input Image", img);
+	dgm::CCMat	confMat(nStates), confMatGlobal(nStates);
 
-	//Mat gt = imread(argv[2], 1);
-	Mat gt = imread("D:\\Data\\EMDS4\\Ground_Truth_Images\\t4-g02-11.png", 0);
-	gt /= 255;
-	gt *= 255;
-	if (gt.empty()) {
-		printf("Failed to load annotations %s\n", argv[2]);
-		return 1;
-	}
-	imshow("Groundtruth", gt);
-	
-	if (img.cols != gt.cols || img.rows != gt.rows) {
-		printf("Annotation size doesn't match image!\n");
-		return 1;
-	}
-	
-	int width = img.cols;
-	int height = img.rows;
+	char path[256];
 
-	/////////// Put your own unary classifier here! ///////////
-	gt /= 255;
-	gt *= 2;
-	Mat pot1 = classify(gt, nStates);		// Pot is CV32FC(nStates)
 	fillPalette();
-	Mat pot = dgm::Serialize::from("D:\\Res\\Potentials\\t4-g02-11.dat");
-	
-	printf("nChannels = %d\n", pot.channels());
-	if (pot.cols == pot1.cols)		printf("cols OK\n");
-	if (pot.rows == pot1.rows)		printf("rows OK\n");
-	if (pot.type() == pot1.type())	printf("type OK\n");
+
+	for (word m = 1; m <= 21; m++) {
+		if (m == 17) continue;
+		for (word i = 11; i <= 20; i++) {
+			if (m == 6 && i == 17) continue;
+			if (m == 18 && i == 9) continue;
+			printf("#%d-%d: ", m, i);
+		
+			sprintf(path, "Z:\\Data\\_Kimiaki\\EMImages\\t4-g%02d-%02d.png", m < 17 ? m : m - 1, i);
+			Mat img = imread(path);
+			imshow("Input Image", img);
+
+			// ==================== STAGE 3: Filling the Graph =====================
+			sprintf(path, "D:\\Res\\CNN 1024 Potentials\\t4-g%02d-%02d.dat", m, i);
+			Mat pot = dgm::Serialize::from(path);
+			for (int y = 0; y < pot.rows; y++) {
+				float		* pPot = pot.ptr<float>(y);
+				for (int x = 0; x < pot.cols; x++) {
+					for (int s = 0; s < nStates; s++)
+						pPot[x * nStates + s] = -logf(pPot[x * nStates + s]);
+				} // x
+			} // y
+
+			DenseCRF2D crf(img.cols, img.rows, nStates);
+			crf.setUnaryEnergy(reinterpret_cast<float *>(pot.data));
+			crf.addPairwiseGaussian(3, 3, 3);
+			crf.addPairwiseBilateral(60, 60, 20, 20, 20, img.data, 10);
+			
+			// ========================= STAGE 4: Decoding =========================
+			short *map = new short[img.cols * img.rows];
+			crf.map(10, map);
+			vec_byte_t	optimalDecoding;
+			for (int i = 0; i < img.cols * img.rows; i++)
+				optimalDecoding.push_back( static_cast<byte>(map[i]));
+			delete[] map;
+
+			// ====================== Evaluation =======================
+			Mat solution(img.size(), CV_8UC1, optimalDecoding.data());
+			sprintf(path, "D:\\Res\\SC %d\\t4-g%02d-%02d-result.bmp", 1024, m, i);
+			imwrite(path, solution);
+			
+			sprintf(path, "Z:\\Data\\_Kimiaki\\GroundTruthImages_BlackOrWhite\\t4-g%02d-%02d.png", m < 17 ? m : m - 1, i);
+			Mat gt = imread(path, 0);
+			imshow("Groundtruth", gt);
+			gt /= 255;
+			byte gt_state = (m > 17) ? m - 1 : m;
+			gt *= gt_state;
+
+			confMatGlobal.estimate(gt, solution);
+			confMat.estimate(gt, solution);
+			float accuracy = confMat.getAccuracy();
+			confMat.reset();
+
+			char str[255];
+			sprintf(str, "Accuracy = %.2f%%", accuracy);
+			printf("%s\n", str);
+
+			// ====================== Visualization =======================
+			Mat res = colorize<byte>(solution);
+			imshow("Solution", res);
+			sprintf(path, "D:\\Res\\SC %d\\t4-g%02d-%02d-solution-CNN_%d (%d,%02d).jpg", 1024, m, i, 1024, (int)accuracy, (int)((accuracy - (int)accuracy) * 100));
+			imwrite(path, res);
+
+			cvWaitKey(25);
+		} // i
+	} // m
+
+	dgm::vis::CMarker marker;
+	Mat confusionMat = confMatGlobal.getConfusionMatrix();
+	Mat confusionMatImg = marker.drawConfusionMatrix(confusionMat, dgm::vis::MARK_BW | dgm::vis::MARK_PERCLASS);
+	imshow("Confusion Matrix", confusionMatImg);
+	sprintf(path, "D:\\Res\\SC %d\\cMat.jpg", 1024);
+	imwrite(path, confusionMatImg);
+
+	cvWaitKey();
+	return 0;
+
+	/*
 	dgm::CGraphExt graph(nStates);
 	graph.build(pot.size());
 	graph.setNodes(pot);
 	vec_byte_t optimalDecoding = dgm::CDecode::decode(&graph);
 	Mat solution(pot.size(), CV_8UC1, optimalDecoding.data());
 	Mat resDGM = colorize<byte>(solution);
-
-
-	for (int y = 0; y < pot.rows; y++) {
-		float		* pPot = pot.ptr<float>(y);
-		for (int x = 0; x < pot.cols; x++) {
-			for (int s = 0; s < nStates; s++)
-				pPot[x * nStates + s] = -logf(pPot[x * nStates + s]);
-		} // x
-	} // y
-
-
-
-	//imshow("Pot", pot);
-	///////////////////////////////////////////////////////////
-	
-	// Setup the CRF model
-	DenseCRF2D crf(width, height, nStates);
-	
-	// Specify the unary potential as an array of size W*H*(#classes)
-	// packing order: x0y0l0 x0y0l1 x0y0l2 .. x1y0l0 x1y0l1 ...
-	crf.setUnaryEnergy(reinterpret_cast<float *>(pot.data));
-	
-	// add a color independent term (feature = pixel location 0..W-1, 0..H-1)
-	// x_stddev = 3
-	// y_stddev = 3
-	// weight = 3
-	crf.addPairwiseGaussian(3, 3, 3);
-	
-	// add a color dependent term (feature = xyrgb)
-	// x_stddev = 60
-	// y_stddev = 60
-	// r_stddev = g_stddev = b_stddev = 20
-	// weight = 10
-	crf.addPairwiseBilateral(60, 60, 20, 20, 20, img.data, 10);
-	
-	// Do map inference
-	short *map = new short[width * height];
-	crf.map(100, map);
-	
-	// Store the result
-	Mat res = colorize<short>(Mat(height, width, CV_16UC1, map));
-	
 	imshow("Result DGB", resDGM);
-	imshow("Result", res);
-	cvWaitKey();
-	
-//	imwrite(argv[3], res);
-	
-	delete[] map;
-
-	return 0;
+	*/
 }

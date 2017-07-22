@@ -28,6 +28,7 @@
 #pragma once
 
 #include "DGM.h"
+#include "VIS.h"
 
 namespace dgm = DirectGraphicalModels;
 
