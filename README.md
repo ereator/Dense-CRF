@@ -1,3 +1,5 @@
+### This project is deprecated. The dense graphical models were re-implemented and optimized in the [Direct Graphical Models library](https://github.com/Project-10/DGM)
+
 # DenseCRF + Direct Graphical Models
 
 This is a modification of the [DenseCRF Code](http://graphics.stanford.edu/projects/densecrf/), which now supports OpenCV and DGM libraries.
